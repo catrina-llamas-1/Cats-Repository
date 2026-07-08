@@ -1,14 +1,16 @@
 """
-Interactive folium dashboard: pins filterable by submarket, with a side
-table showing details for every pin currently on the map.
+Interactive folium dashboard: pins filterable by submarket, with a table
+below the map showing details for every pin currently on the map.
 
 Reads addresses, a single "lat, lon" coordinate column, and submarket
 categories (+ any extra info columns) from an Excel file and produces a
 single self-contained HTML file with:
   - a Leaflet/folium map, one colored pin per row (color = submarket)
-  - a checkbox filter panel (toggle any combination of submarkets)
-  - a side table listing every currently-visible pin; clicking a row pans
-    the map to that pin and opens its popup, clicking a pin highlights its row
+  - a full-width checkbox filter bar above the map (wraps across rows —
+    every submarket checkbox stays visible, no scrolling required)
+  - a table below the map listing every currently-visible pin; clicking a
+    row pans the map to that pin and opens its popup, clicking a pin
+    highlights its row
 
 Usage:
     pip install folium pandas openpyxl
@@ -36,7 +38,7 @@ INFO_COLS     = None                # list of extra columns to show in the table
 OUTPUT_PATH  = "submarket_map.html"
 MAP_TILE     = "cartodbpositron"
 ZOOM_START   = 12
-SIDEBAR_WIDTH_PX = 380
+TABLE_HEIGHT_PX = 280   # fixed height of the pin table panel below the map
 
 # Categorical palette (validated for colorblind-safety, fixed hue order — do not reorder)
 CATEGORY_COLORS = [
@@ -125,9 +127,9 @@ def assign_colors(records: list[dict]) -> dict:
 
 
 class SubmarketDashboard(MacroElement):
-    """Injects the sidebar (filters + table) and wires it up to the folium map."""
+    """Injects the filter bar + table and wires them up to the folium map."""
 
-    def __init__(self, records: list[dict], info_cols: list[str], colors: dict, sidebar_width: int):
+    def __init__(self, records: list[dict], info_cols: list[str], colors: dict, table_height: int):
         super().__init__()
         self._name = "SubmarketDashboard"
         for i, r in enumerate(records):
@@ -135,7 +137,7 @@ class SubmarketDashboard(MacroElement):
         self.records_json = json.dumps(records)
         self.info_cols_json = json.dumps(info_cols)
         self.colors_json = json.dumps(colors)
-        self.sidebar_width = sidebar_width
+        self.table_height = table_height
         self._template = Template(u"""
 {% macro header(this, kwargs) %}
 <style>
@@ -166,61 +168,65 @@ class SubmarketDashboard(MacroElement):
   html, body { height: 100%; margin: 0; padding: 0; }
   body {
     display: flex;
-    flex-direction: row;
+    flex-direction: column;
     font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
     background: var(--page);
     color: var(--ink-primary);
   }
   #{{this._parent.get_name()}} {
+    order: 2;
     flex: 1 1 auto !important;
-    width: auto !important;
-    height: 100% !important;
+    width: 100% !important;
+    height: auto !important;
   }
-  #sm-sidebar {
-    flex: 0 0 {{this.sidebar_width}}px;
-    height: 100vh;
-    display: flex;
-    flex-direction: column;
+  #sm-filterbar {
+    order: 1;
+    flex: 0 0 auto;
+    width: 100%;
     background: var(--surface-1);
-    border-left: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
     box-sizing: border-box;
+    padding: 12px 16px;
   }
-  #sm-sidebar h2 {
+  #sm-filterbar-head {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+  #sm-filterbar-head h2 {
     font-size: 1.125rem;
     margin: 0;
-    padding: 14px 16px 4px;
     color: var(--ink-primary);
   }
   #sm-count {
     font-size: 0.875rem;
     color: var(--ink-secondary);
-    padding: 0 16px 10px;
-    border-bottom: 1px solid var(--gridline);
   }
-  #sm-filters {
-    padding: 10px 16px;
-    border-bottom: 1px solid var(--gridline);
-    max-height: 34vh;
-    overflow-y: auto;
-  }
-  #sm-filters .sm-filter-actions {
+  .sm-filter-actions {
     display: flex;
     gap: 10px;
     margin-bottom: 8px;
   }
-  #sm-filters .sm-filter-actions a {
+  .sm-filter-actions a {
     font-size: 0.875rem;
     color: var(--ink-secondary);
     cursor: pointer;
     text-decoration: underline;
   }
+  #sm-filters {
+    display: flex;
+    flex-wrap: wrap;
+    row-gap: 6px;
+    column-gap: 24px;
+  }
   .sm-filter-row {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 4px 0;
     font-size: 1rem;
     color: var(--ink-primary);
+    white-space: nowrap;
   }
   .sm-swatch {
     width: 10px;
@@ -229,7 +235,6 @@ class SubmarketDashboard(MacroElement):
     flex: 0 0 auto;
   }
   .sm-filter-row label {
-    flex: 1 1 auto;
     cursor: pointer;
   }
   .sm-filter-row .sm-cat-count {
@@ -237,8 +242,13 @@ class SubmarketDashboard(MacroElement):
     font-variant-numeric: tabular-nums;
   }
   #sm-table-wrap {
-    flex: 1 1 auto;
+    order: 3;
+    flex: 0 0 {{this.table_height}}px;
+    width: 100%;
     overflow-y: auto;
+    box-sizing: border-box;
+    border-top: 1px solid var(--border);
+    background: var(--surface-1);
   }
   table#sm-table {
     width: 100%;
@@ -281,16 +291,22 @@ class SubmarketDashboard(MacroElement):
 {% endmacro %}
 
 {% macro html(this, kwargs) %}
-<div id="sm-sidebar">
-  <h2>Pins</h2>
-  <div id="sm-count"></div>
-  <div id="sm-filters"></div>
-  <div id="sm-table-wrap">
-    <table id="sm-table">
-      <thead><tr id="sm-thead-row"></tr></thead>
-      <tbody id="sm-tbody"></tbody>
-    </table>
+<div id="sm-filterbar">
+  <div id="sm-filterbar-head">
+    <h2>Pins</h2>
+    <div id="sm-count"></div>
   </div>
+  <div class="sm-filter-actions">
+    <a id="sm-all-link">All</a>
+    <a id="sm-none-link">None</a>
+  </div>
+  <div id="sm-filters"></div>
+</div>
+<div id="sm-table-wrap">
+  <table id="sm-table">
+    <thead><tr id="sm-thead-row"></tr></thead>
+    <tbody id="sm-tbody"></tbody>
+  </table>
 </div>
 {% endmacro %}
 
@@ -352,16 +368,8 @@ class SubmarketDashboard(MacroElement):
 
   // ── filter panel ────────────────────────────────────────────────────────
   var filtersEl = document.getElementById("sm-filters");
-
-  var actions = document.createElement("div");
-  actions.className = "sm-filter-actions";
-  var allLink = document.createElement("a");
-  allLink.textContent = "All";
-  var noneLink = document.createElement("a");
-  noneLink.textContent = "None";
-  actions.appendChild(allLink);
-  actions.appendChild(noneLink);
-  filtersEl.appendChild(actions);
+  var allLink = document.getElementById("sm-all-link");
+  var noneLink = document.getElementById("sm-none-link");
 
   var checkboxes = {};
   categories.forEach(function(cat) {
@@ -508,7 +516,7 @@ def main():
     colors = assign_colors(records)
 
     m = folium.Map(location=[records[0]["lat"], records[0]["lon"]], zoom_start=ZOOM_START, tiles=MAP_TILE)
-    m.add_child(SubmarketDashboard(records, info_cols, colors, SIDEBAR_WIDTH_PX))
+    m.add_child(SubmarketDashboard(records, info_cols, colors, TABLE_HEIGHT_PX))
     m.save(OUTPUT_PATH)
     print(f"Saved interactive dashboard to: {OUTPUT_PATH}")
 
