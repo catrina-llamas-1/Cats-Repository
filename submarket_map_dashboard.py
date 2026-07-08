@@ -186,13 +186,13 @@ class SubmarketDashboard(MacroElement):
     box-sizing: border-box;
   }
   #sm-sidebar h2 {
-    font-size: 0.95rem;
+    font-size: 1.125rem;
     margin: 0;
     padding: 14px 16px 4px;
     color: var(--ink-primary);
   }
   #sm-count {
-    font-size: 0.8rem;
+    font-size: 0.875rem;
     color: var(--ink-secondary);
     padding: 0 16px 10px;
     border-bottom: 1px solid var(--gridline);
@@ -209,7 +209,7 @@ class SubmarketDashboard(MacroElement):
     margin-bottom: 8px;
   }
   #sm-filters .sm-filter-actions a {
-    font-size: 0.78rem;
+    font-size: 0.875rem;
     color: var(--ink-secondary);
     cursor: pointer;
     text-decoration: underline;
@@ -218,8 +218,8 @@ class SubmarketDashboard(MacroElement):
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 3px 0;
-    font-size: 0.85rem;
+    padding: 4px 0;
+    font-size: 1rem;
     color: var(--ink-primary);
   }
   .sm-swatch {
@@ -243,7 +243,7 @@ class SubmarketDashboard(MacroElement):
   table#sm-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 0.8rem;
+    font-size: 1rem;
   }
   table#sm-table th {
     position: sticky;
@@ -252,12 +252,13 @@ class SubmarketDashboard(MacroElement):
     text-align: left;
     color: var(--ink-muted);
     font-weight: 600;
-    padding: 6px 8px;
+    font-size: 0.875rem;
+    padding: 8px;
     border-bottom: 1px solid var(--gridline);
     white-space: nowrap;
   }
   table#sm-table td {
-    padding: 6px 8px;
+    padding: 8px;
     border-bottom: 1px solid var(--gridline);
     vertical-align: top;
     color: var(--ink-primary);
@@ -274,7 +275,7 @@ class SubmarketDashboard(MacroElement):
   .sm-empty {
     padding: 16px;
     color: var(--ink-muted);
-    font-size: 0.85rem;
+    font-size: 0.9375rem;
   }
 </style>
 {% endmacro %}
@@ -326,8 +327,10 @@ class SubmarketDashboard(MacroElement):
 
   function popupContent(r) {
     var div = document.createElement("div");
+    div.style.fontSize = "14px";
     var title = document.createElement("div");
     title.style.fontWeight = "600";
+    title.style.fontSize = "15px";
     title.style.marginBottom = "4px";
     title.textContent = r.address;
     div.appendChild(title);
@@ -341,7 +344,6 @@ class SubmarketDashboard(MacroElement):
     infoCols.forEach(function(col) {
       if (r.info[col] === undefined) return;
       var line = document.createElement("div");
-      line.style.fontSize = "0.85em";
       line.textContent = col + ": " + r.info[col];
       div.appendChild(line);
     });
