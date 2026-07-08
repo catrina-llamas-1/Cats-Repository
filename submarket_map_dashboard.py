@@ -2,9 +2,9 @@
 Interactive folium dashboard: pins filterable by submarket, with a side
 table showing details for every pin currently on the map.
 
-Reads addresses, latitude/longitude, and submarket categories (+ any extra
-info columns) from an Excel file and produces a single self-contained HTML
-file with:
+Reads addresses, a single "lat, lon" coordinate column, and submarket
+categories (+ any extra info columns) from an Excel file and produces a
+single self-contained HTML file with:
   - a Leaflet/folium map, one colored pin per row (color = submarket)
   - a checkbox filter panel (toggle any combination of submarkets)
   - a side table listing every currently-visible pin; clicking a row pans
@@ -19,6 +19,7 @@ Edit the CONFIG section below to point at your Excel file and columns.
 
 import json
 import os
+import re
 import pandas as pd
 import folium
 from branca.element import MacroElement
@@ -27,8 +28,7 @@ from jinja2 import Template
 # ── CONFIG ────────────────────────────────────────────────────────────────────
 EXCEL_FILE    = "properties.xlsx"   # input spreadsheet (.xlsx/.xls/.csv)
 ADDRESS_COL   = "Address"           # column holding the address (shown as the pin/row label)
-LAT_COL       = "Latitude"          # column holding decimal latitude
-LON_COL       = "Longitude"         # column holding decimal longitude
+COORDS_COL    = "Coordinates"       # column holding "lat, lon" (e.g. "53.5444, -113.4909")
 SUBMARKET_COL = "Submarket"         # column holding the filter category
 INFO_COLS     = None                # list of extra columns to show in the table/popup;
                                      # None = use every other column in the file
@@ -53,11 +53,27 @@ FALLBACK_COLOR = "#898781"  # used past the 8th distinct submarket
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+COORD_PATTERN = re.compile(r"-?\d+\.\d+|-?\d+")
+
+
+def parse_coords(raw) -> tuple[float, float] | None:
+    """Pull (lat, lon) out of a single "lat, lon"-style cell, or None if it can't be parsed."""
+    if pd.isna(raw):
+        return None
+    numbers = COORD_PATTERN.findall(str(raw))
+    if len(numbers) < 2:
+        return None
+    lat, lon = float(numbers[0]), float(numbers[1])
+    if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+        return None
+    return lat, lon
+
+
 def load_rows() -> pd.DataFrame:
     ext = os.path.splitext(EXCEL_FILE)[-1].lower()
     df = pd.read_csv(EXCEL_FILE, dtype=str) if ext == ".csv" else pd.read_excel(EXCEL_FILE, dtype=str)
 
-    for col in (ADDRESS_COL, LAT_COL, LON_COL, SUBMARKET_COL):
+    for col in (ADDRESS_COL, COORDS_COL, SUBMARKET_COL):
         if col not in df.columns:
             raise ValueError(f"Column '{col}' not found in {EXCEL_FILE}. Available columns: {list(df.columns)}")
 
@@ -69,22 +85,18 @@ def load_rows() -> pd.DataFrame:
 def info_columns(df: pd.DataFrame) -> list[str]:
     if INFO_COLS is not None:
         return [c for c in INFO_COLS if c in df.columns]
-    return [c for c in df.columns if c not in (ADDRESS_COL, LAT_COL, LON_COL, SUBMARKET_COL)]
+    return [c for c in df.columns if c not in (ADDRESS_COL, COORDS_COL, SUBMARKET_COL)]
 
 
 def build_records(df: pd.DataFrame, info_cols: list[str]) -> list[dict]:
     records = []
     skipped = 0
     for _, row in df.iterrows():
-        try:
-            lat = float(row[LAT_COL])
-            lon = float(row[LON_COL])
-        except (TypeError, ValueError):
+        parsed = parse_coords(row[COORDS_COL])
+        if parsed is None:
             skipped += 1
             continue
-        if pd.isna(lat) or pd.isna(lon):
-            skipped += 1
-            continue
+        lat, lon = parsed
 
         info = {c: row[c] for c in info_cols if c in row and not pd.isna(row[c])}
         records.append({
@@ -96,7 +108,7 @@ def build_records(df: pd.DataFrame, info_cols: list[str]) -> list[dict]:
         })
 
     if skipped:
-        print(f"Skipped {skipped} row(s) with missing/invalid {LAT_COL}/{LON_COL} values.")
+        print(f"Skipped {skipped} row(s) with missing/invalid {COORDS_COL} values.")
 
     return records
 
@@ -488,7 +500,7 @@ def main():
     print(f"Plotting {len(records)}/{len(df)} row(s).")
 
     if not records:
-        print(f"Nothing to plot — no rows had valid {LAT_COL}/{LON_COL} values.")
+        print(f"Nothing to plot — no rows had valid {COORDS_COL} values.")
         return
 
     colors = assign_colors(records)
