@@ -270,7 +270,7 @@ class SubmarketDashboard(MacroElement):
   table#sm-table td {
     padding: 8px;
     border-bottom: 1px solid var(--gridline);
-    vertical-align: top;
+    vertical-align: middle;
     color: var(--ink-primary);
   }
   table#sm-table tr.sm-row {
