@@ -1,17 +1,17 @@
 """
-Interactive folium dashboard: address pins filterable by submarket,
-with a side table showing details for every pin currently on the map.
+Interactive folium dashboard: pins filterable by submarket, with a side
+table showing details for every pin currently on the map.
 
-Reads addresses + submarket categories (+ any extra info columns) from an
-Excel file, geocodes each address, and produces a single self-contained
-HTML file with:
-  - a Leaflet/folium map, one colored pin per address (color = submarket)
+Reads addresses, latitude/longitude, and submarket categories (+ any extra
+info columns) from an Excel file and produces a single self-contained HTML
+file with:
+  - a Leaflet/folium map, one colored pin per row (color = submarket)
   - a checkbox filter panel (toggle any combination of submarkets)
   - a side table listing every currently-visible pin; clicking a row pans
     the map to that pin and opens its popup, clicking a pin highlights its row
 
 Usage:
-    pip install folium geopy pandas openpyxl
+    pip install folium pandas openpyxl
     python submarket_map_dashboard.py
 
 Edit the CONFIG section below to point at your Excel file and columns.
@@ -23,12 +23,12 @@ import pandas as pd
 import folium
 from branca.element import MacroElement
 from jinja2 import Template
-from geopy.geocoders import Nominatim
-from geopy.extra.rate_limiter import RateLimiter
 
 # ── CONFIG ────────────────────────────────────────────────────────────────────
 EXCEL_FILE    = "properties.xlsx"   # input spreadsheet (.xlsx/.xls/.csv)
-ADDRESS_COL   = "Address"           # column holding the address to geocode
+ADDRESS_COL   = "Address"           # column holding the address (shown as the pin/row label)
+LAT_COL       = "Latitude"          # column holding decimal latitude
+LON_COL       = "Longitude"         # column holding decimal longitude
 SUBMARKET_COL = "Submarket"         # column holding the filter category
 INFO_COLS     = None                # list of extra columns to show in the table/popup;
                                      # None = use every other column in the file
@@ -37,9 +37,6 @@ OUTPUT_PATH  = "submarket_map.html"
 MAP_TILE     = "cartodbpositron"
 ZOOM_START   = 12
 SIDEBAR_WIDTH_PX = 380
-
-GEOCODER_USER_AGENT = "cats-repository-address-mapper"
-CACHE_PATH           = "geocode_cache.csv"   # remembers past lookups so reruns don't re-geocode everything
 
 # Categorical palette (validated for colorblind-safety, fixed hue order — do not reorder)
 CATEGORY_COLORS = [
@@ -60,7 +57,7 @@ def load_rows() -> pd.DataFrame:
     ext = os.path.splitext(EXCEL_FILE)[-1].lower()
     df = pd.read_csv(EXCEL_FILE, dtype=str) if ext == ".csv" else pd.read_excel(EXCEL_FILE, dtype=str)
 
-    for col in (ADDRESS_COL, SUBMARKET_COL):
+    for col in (ADDRESS_COL, LAT_COL, LON_COL, SUBMARKET_COL):
         if col not in df.columns:
             raise ValueError(f"Column '{col}' not found in {EXCEL_FILE}. Available columns: {list(df.columns)}")
 
@@ -72,71 +69,35 @@ def load_rows() -> pd.DataFrame:
 def info_columns(df: pd.DataFrame) -> list[str]:
     if INFO_COLS is not None:
         return [c for c in INFO_COLS if c in df.columns]
-    return [c for c in df.columns if c not in (ADDRESS_COL, SUBMARKET_COL)]
+    return [c for c in df.columns if c not in (ADDRESS_COL, LAT_COL, LON_COL, SUBMARKET_COL)]
 
 
-def load_cache() -> dict:
-    if os.path.exists(CACHE_PATH):
-        return pd.read_csv(CACHE_PATH, dtype=str).set_index("address").to_dict("index")
-    return {}
-
-
-def save_cache(cache: dict) -> None:
-    pd.DataFrame.from_dict(cache, orient="index").rename_axis("address").reset_index().to_csv(CACHE_PATH, index=False)
-
-
-def geocode_column(addresses: list[str]) -> dict:
-    """Return {address: (lat, lon)} for every address that could be geocoded."""
-    geolocator = Nominatim(user_agent=GEOCODER_USER_AGENT)
-    geocode = RateLimiter(geolocator.geocode, min_delay_seconds=1)
-
-    cache = load_cache()
-    resolved = {}
-    failed = []
-
-    for address in dict.fromkeys(addresses):  # de-duped, order-preserving
-        cached = cache.get(address)
-        if cached is not None:
-            lat, lon = cached.get("lat"), cached.get("lon")
-            if pd.isna(lat) or lat in ("", None):
-                failed.append(address)
-                continue
-            resolved[address] = (float(lat), float(lon))
-            continue
-
-        location = geocode(address)
-        if location:
-            cache[address] = {"lat": location.latitude, "lon": location.longitude}
-            resolved[address] = (location.latitude, location.longitude)
-        else:
-            cache[address] = {"lat": "", "lon": ""}
-            failed.append(address)
-
-    save_cache(cache)
-
-    if failed:
-        print(f"Could not geocode {len(failed)} address(es):")
-        for a in failed:
-            print(f"  - {a}")
-
-    return resolved
-
-
-def build_records(df: pd.DataFrame, coords: dict, info_cols: list[str]) -> list[dict]:
+def build_records(df: pd.DataFrame, info_cols: list[str]) -> list[dict]:
     records = []
+    skipped = 0
     for _, row in df.iterrows():
-        address = row[ADDRESS_COL]
-        if address not in coords:
+        try:
+            lat = float(row[LAT_COL])
+            lon = float(row[LON_COL])
+        except (TypeError, ValueError):
+            skipped += 1
             continue
-        lat, lon = coords[address]
+        if pd.isna(lat) or pd.isna(lon):
+            skipped += 1
+            continue
+
         info = {c: row[c] for c in info_cols if c in row and not pd.isna(row[c])}
         records.append({
-            "address": address,
+            "address": row[ADDRESS_COL],
             "submarket": row[SUBMARKET_COL],
             "lat": lat,
             "lon": lon,
             "info": info,
         })
+
+    if skipped:
+        print(f"Skipped {skipped} row(s) with missing/invalid {LAT_COL}/{LON_COL} values.")
+
     return records
 
 
@@ -522,14 +483,12 @@ def main():
     info_cols = info_columns(df)
 
     print(f"Loaded {len(df)} row(s) from {EXCEL_FILE}")
-    print(f"Geocoding {df[ADDRESS_COL].nunique()} unique address(es)...")
-    coords = geocode_column(df[ADDRESS_COL].tolist())
 
-    records = build_records(df, coords, info_cols)
-    print(f"Plotting {len(records)}/{len(df)} row(s) (rows that failed to geocode are skipped).")
+    records = build_records(df, info_cols)
+    print(f"Plotting {len(records)}/{len(df)} row(s).")
 
     if not records:
-        print("Nothing to plot — no addresses were successfully geocoded.")
+        print(f"Nothing to plot — no rows had valid {LAT_COL}/{LON_COL} values.")
         return
 
     colors = assign_colors(records)
